@@ -2,11 +2,12 @@ import asyncio
 import random
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
-API_ID = 7832255
-API_HASH = "25d037f2d44d51691a7a9c92f2ed1a1d"
+# ===== ТВОЯ НОВАЯ СЕССИЯ (правильная) =====
+SESSION = "1AZWarzUBu1oI9h_g78W0oqcKfDLve8NiYQLBdA5-Tw-zz6HSKd37sEYGiR5f_T0TrM3zRuHEBXwwirA_PlIiLdIPGPKQzKQYTi5Kc5MW5qU1hfGKlp8kgTMYxRF14mq4WuaPTw2L5Yt75JRjD_X3i7aWZYL2X9BjBwBdk6iMJOmlIQg1Yq662ANjej8VLuhb68Twt-uyRw7s3jbgD3-29pcq1-sxWpFJbOhMAq8itkTWcQuQ2DFIou73djHKV5wC2JSwFWV0hn6jY30pH3LgHzSNwMSNNNleMHnnCwvxCg9Xqy3h4G7AggEFh5IwOM7RiH3bJIEkfb6_kpyO-pY0nVq0uWeGok0="
 
-client = TelegramClient("my_userbot", API_ID, API_HASH)
+client = TelegramClient(StringSession(SESSION), 7832255, "25d037f2d44d51691a7a9c92f2ed1a1d")
 
 TARGET_CHAT = "@username"  # ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ
 INTERVAL_MINUTES = 55
