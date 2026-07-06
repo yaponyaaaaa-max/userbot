@@ -15,6 +15,7 @@ INTERVAL_MINUTES = 55
 MESSAGES_FILE = "data.txt"
 MENU_VIDEO_FILE = "menu_video.json"
 
+# Хранилище: {user_id: [список сообщений]}
 calendars = {}
 auto_replies = {}
 media_auto_replies = {}
@@ -43,24 +44,29 @@ def log_to_file(message):
     with open("log.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} - {message}\n")
 
-# ===== ОТПРАВКА ПО РАСПИСАНИЮ =====
-async def send_scheduled_messages():
-    await asyncio.sleep(10)
+# ===== ФУНКЦИЯ ДЛЯ БЕСКОНЕЧНОЙ ОТПРАВКИ =====
+async def send_loop(user_id, messages, delay_minutes):
+    """Отправляет сообщения из списка по очереди, бесконечно"""
+    index = 0
     while True:
-        messages = load_messages()
-        if not messages:
-            await asyncio.sleep(INTERVAL_MINUTES * 60)
-            continue
+        try:
+            if not messages:
+                await asyncio.sleep(60)
+                continue
 
-        for user_id, msgs in list(calendars.items()):
-            if msgs:
-                msg = random.choice(messages)
-                try:
-                    await client.send_message(user_id, msg)
-                    log_to_file(f"Календарь для {user_id}: {msg[:30]}...")
-                except Exception as e:
-                    log_to_file(f"Ошибка отправки {user_id}: {e}")
-        await asyncio.sleep(INTERVAL_MINUTES * 60)
+            msg = messages[index % len(messages)]
+            await client.send_message(user_id, msg)
+            log_to_file(f"Календарь {user_id}: {msg[:30]}...")
+
+            # Переход к следующему сообщению
+            index += 1
+
+            # Ждём INTERVAL_MINUTES минут
+            await asyncio.sleep(delay_minutes * 60)
+
+        except Exception as e:
+            log_to_file(f"Ошибка в цикле отправки {user_id}: {e}")
+            await asyncio.sleep(60)
 
 # ===== МЕНЮ =====
 @client.on(events.NewMessage(pattern=r'\.menu$'))
@@ -68,7 +74,7 @@ async def menu_command(event):
     menu_text = """
 ✦ USERBOT MENU ✦
 
-.dmcnc @username — календарь (если без юзера — для чата)
+.dmcnc @username — календарь (бесконечный, берёт из data.txt)
 .dmcnr @username — автоответчик
 .dmcnrm @username — медиа-автоответчик
 .cln @username — очистка календаря
@@ -104,7 +110,7 @@ async def save_menu_video_handler(event):
 async def ping_command(event):
     await event.reply('✦ Понг!')
 
-# ===== КАЛЕНДАРЬ (.dmcnc) =====
+# ===== КАЛЕНДАРЬ (.dmcnc) — БЕСКОНЕЧНЫЙ =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s*(?:@(\S+))?'))
 async def calendar_command(event):
     args = event.raw_text.split()
@@ -123,18 +129,50 @@ async def calendar_command(event):
             await event.reply('✦ Юзернейм не найден')
             return
     else:
-        user_id = event.chat_id  # <--- привязываем к чату, где написана команда
+        user_id = event.chat_id
 
-    if user_id not in calendars:
-        calendars[user_id] = []
+    # Загружаем все сообщения из data.txt
+    messages = load_messages()
+    if not messages:
+        await event.reply('✦ Файл data.txt пуст!')
+        return
 
-    calendars[user_id].append({
-        'text': '✦ Отложенное сообщение',
-        'time': datetime.now() + timedelta(hours=1)
-    })
+    # Сохраняем в календарь (чтобы можно было остановить)
+    calendars[user_id] = messages.copy()
 
-    log_to_file(f"Календарь для {user_id} продолжен ({len(calendars[user_id])} задач)")
-    await event.reply(f'✦ Календарь для {target or "этого чата"} продолжен ({len(calendars[user_id])} задач)')
+    # Запускаем бесконечную отправку
+    asyncio.create_task(send_loop(user_id, messages, INTERVAL_MINUTES))
+
+    log_to_file(f"Бесконечный календарь для {user_id} запущен ({len(messages)} сообщений)")
+    await event.reply(f'✦ Бесконечный календарь для {target or "этого чата"} запущен! Сообщения из data.txt будут отправляться каждые {INTERVAL_MINUTES} минут.')
+
+# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) — ОСТАНАВЛИВАЕТ ЛИШЬ ДЛЯ ЭТОГО ЮЗЕРА =====
+@client.on(events.NewMessage(pattern=r'\.cln\s*(?:@(\S+))?'))
+async def clear_calendar(event):
+    args = event.raw_text.split()
+    target = args[1] if len(args) > 1 else None
+    if target and target.startswith('@'):
+        target = target[1:]
+    else:
+        target = None
+
+    user_id = None
+    if target:
+        try:
+            entity = await client.get_entity(target)
+            user_id = entity.id
+        except:
+            await event.reply('✦ Юзернейм не найден')
+            return
+    else:
+        user_id = event.chat_id
+
+    if user_id in calendars:
+        del calendars[user_id]
+        log_to_file(f"Календарь для {user_id} остановлен")
+        await event.reply(f'✦ Бесконечный календарь для {target or "этого чата"} остановлен!')
+    else:
+        await event.reply(f'✦ Календарь для {target or "этого чата"} не найден')
 
 # ===== АВТООТВЕТЧИК (.dmcnr) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnr\s*(?:@(\S+))?'))
@@ -193,34 +231,6 @@ async def media_autoreply_command(event):
     }
     log_to_file(f"Медиа-автоответчик для {user_id} включен")
     await event.reply(f'✦ Медиа-автоответчик для {target or "этого чата"} включен')
-
-# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) =====
-@client.on(events.NewMessage(pattern=r'\.cln\s*(?:@(\S+))?'))
-async def clear_calendar(event):
-    args = event.raw_text.split()
-    target = args[1] if len(args) > 1 else None
-    if target and target.startswith('@'):
-        target = target[1:]
-    else:
-        target = None
-
-    user_id = None
-    if target:
-        try:
-            entity = await client.get_entity(target)
-            user_id = entity.id
-        except:
-            await event.reply('✦ Юзернейм не найден')
-            return
-    else:
-        user_id = event.chat_id
-
-    if user_id in calendars:
-        del calendars[user_id]
-        log_to_file(f"Календарь для {user_id} очищен")
-        await event.reply(f'✦ Календарь для {target or "этого чата"} очищен')
-    else:
-        await event.reply(f'✦ Календарь для {target or "этого чата"} не найден')
 
 # ===== ОСТАНОВКА АВТООТВЕТЧИКА (.stop) =====
 @client.on(events.NewMessage(pattern=r'\.stop\s*(?:@(\S+))?'))
@@ -307,7 +317,7 @@ async def handle_incoming(event):
 async def main():
     await client.start()
     print('✦ Userbot запущен! by domician ✦')
-    asyncio.create_task(send_scheduled_messages())
+    print('✦ Бесконечный календарь запускается командой .dmcnc')
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
