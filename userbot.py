@@ -1,16 +1,18 @@
 import asyncio
 import random
+import os
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 
 API_ID = 7832255
 API_HASH = "25d037f2d44d51691a7a9c92f2ed1a1d"
 
+# Сессия будет сохранена в файл my_userbot.session
 client = TelegramClient("my_userbot", API_ID, API_HASH)
 
-TARGET_CHAT = "@username"  # ЗАМЕНИ НА СВОЙ КАНАЛ/ЧАТ/ЮЗЕРНЕЙМ
-INTERVAL_MINUTES = 55       # ИНТЕРВАЛ В МИНУТАХ
-MESSAGES_FILE = "data.txt"  # ФАЙЛ С СООБЩЕНИЯМИ
+TARGET_CHAT = "@username"  # ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ
+INTERVAL_MINUTES = 55
+MESSAGES_FILE = "data.txt"
 
 calendars = {}
 auto_replies = {}
@@ -55,7 +57,6 @@ async def send_scheduled_messages():
             print(f"✦ Ошибка: {e}")
         await asyncio.sleep(INTERVAL_MINUTES * 60)
 
-# ===== МЕНЮ =====
 @client.on(events.NewMessage(pattern=r'\.menu$'))
 async def menu_command(event):
     menu_text = """
@@ -73,7 +74,6 @@ async def menu_command(event):
     """
     await event.reply(menu_text)
 
-# ===== ПИНГ =====
 @client.on(events.NewMessage(pattern=r'\.ping$'))
 async def ping_command(event):
     start = datetime.now()
@@ -82,7 +82,6 @@ async def ping_command(event):
     ms = (end - start).microseconds / 1000
     await event.edit(f'✦ Понг! ({ms:.2f} мс)')
 
-# ===== ОСТАЛЬНЫЕ КОМАНДЫ =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s+(.+?)(?:\s+шапка)?$'))
 async def calendar_command(event):
     args = event.raw_text.split()
@@ -189,6 +188,8 @@ async def handle_incoming(event):
         return
 
 async def main():
+    # Это нужно, чтобы юзербот не запрашивал номер при запуске
+    # Сессия будет автоматически сохранена после первого запуска
     await client.start()
     print('✦ Юзербот запущен!')
     print(f'✦ Отправка сообщений каждые {INTERVAL_MINUTES} минут')
