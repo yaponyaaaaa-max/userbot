@@ -15,9 +15,9 @@ INTERVAL_MINUTES = 55
 MESSAGES_FILE = "data.txt"
 MENU_VIDEO_FILE = "menu_video.json"
 
-calendars = {}          # {user_id: [сообщения]}
-auto_replies = {}       # {user_id: текст}
-media_auto_replies = {} # {user_id: медиа}
+calendars = {}
+auto_replies = {}
+media_auto_replies = {}
 
 def load_menu_video():
     try:
@@ -123,12 +123,11 @@ async def calendar_command(event):
             await event.reply('✦ Юзернейм не найден')
             return
     else:
-        user_id = event.chat_id
+        user_id = event.chat_id  # <--- привязываем к чату, где написана команда
 
     if user_id not in calendars:
         calendars[user_id] = []
 
-    # Добавляем задачу в календарь
     calendars[user_id].append({
         'text': '✦ Отложенное сообщение',
         'time': datetime.now() + timedelta(hours=1)
