@@ -1,5 +1,4 @@
 import asyncio
-import random
 import json
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
@@ -15,7 +14,6 @@ INTERVAL_MINUTES = 55
 MESSAGES_FILE = "data.txt"
 MENU_VIDEO_FILE = "menu_video.json"
 
-# Хранилище: {user_id: [список сообщений]}
 calendars = {}
 auto_replies = {}
 media_auto_replies = {}
@@ -44,9 +42,8 @@ def log_to_file(message):
     with open("log.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} - {message}\n")
 
-# ===== ФУНКЦИЯ ДЛЯ БЕСКОНЕЧНОЙ ОТПРАВКИ =====
-async def send_loop(user_id, messages, delay_minutes):
-    """Отправляет сообщения из списка по очереди, бесконечно"""
+# ===== БЕСКОНЕЧНАЯ ОТПРАВКА =====
+async def send_loop(user_id, messages):
     index = 0
     while True:
         try:
@@ -58,14 +55,11 @@ async def send_loop(user_id, messages, delay_minutes):
             await client.send_message(user_id, msg)
             log_to_file(f"Календарь {user_id}: {msg[:30]}...")
 
-            # Переход к следующему сообщению
             index += 1
-
-            # Ждём INTERVAL_MINUTES минут
-            await asyncio.sleep(delay_minutes * 60)
+            await asyncio.sleep(INTERVAL_MINUTES * 60)
 
         except Exception as e:
-            log_to_file(f"Ошибка в цикле отправки {user_id}: {e}")
+            log_to_file(f"Ошибка отправки {user_id}: {e}")
             await asyncio.sleep(60)
 
 # ===== МЕНЮ =====
@@ -74,7 +68,7 @@ async def menu_command(event):
     menu_text = """
 ✦ USERBOT MENU ✦
 
-.dmcnc @username — календарь (бесконечный, берёт из data.txt)
+.dmcnc @username — календарь (без ответа)
 .dmcnr @username — автоответчик
 .dmcnrm @username — медиа-автоответчик
 .cln @username — очистка календаря
@@ -110,7 +104,7 @@ async def save_menu_video_handler(event):
 async def ping_command(event):
     await event.reply('✦ Понг!')
 
-# ===== КАЛЕНДАРЬ (.dmcnc) — БЕСКОНЕЧНЫЙ =====
+# ===== ТИХИЙ КАЛЕНДАРЬ (.dmcnc) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s*(?:@(\S+))?'))
 async def calendar_command(event):
     args = event.raw_text.split()
@@ -131,22 +125,22 @@ async def calendar_command(event):
     else:
         user_id = event.chat_id
 
-    # Загружаем все сообщения из data.txt
     messages = load_messages()
     if not messages:
-        await event.reply('✦ Файл data.txt пуст!')
         return
 
-    # Сохраняем в календарь (чтобы можно было остановить)
     calendars[user_id] = messages.copy()
+    asyncio.create_task(send_loop(user_id, messages))
 
-    # Запускаем бесконечную отправку
-    asyncio.create_task(send_loop(user_id, messages, INTERVAL_MINUTES))
+    # Удаляем сообщение с командой
+    try:
+        await event.delete()
+    except:
+        pass
 
-    log_to_file(f"Бесконечный календарь для {user_id} запущен ({len(messages)} сообщений)")
-    await event.reply(f'✦ Бесконечный календарь для {target or "этого чата"} запущен! Сообщения из data.txt будут отправляться каждые {INTERVAL_MINUTES} минут.')
+    log_to_file(f"Календарь для {user_id} запущен (тихо)")
 
-# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) — ОСТАНАВЛИВАЕТ ЛИШЬ ДЛЯ ЭТОГО ЮЗЕРА =====
+# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) =====
 @client.on(events.NewMessage(pattern=r'\.cln\s*(?:@(\S+))?'))
 async def clear_calendar(event):
     args = event.raw_text.split()
@@ -170,7 +164,7 @@ async def clear_calendar(event):
     if user_id in calendars:
         del calendars[user_id]
         log_to_file(f"Календарь для {user_id} остановлен")
-        await event.reply(f'✦ Бесконечный календарь для {target or "этого чата"} остановлен!')
+        await event.delete()
     else:
         await event.reply(f'✦ Календарь для {target or "этого чата"} не найден')
 
@@ -317,7 +311,6 @@ async def handle_incoming(event):
 async def main():
     await client.start()
     print('✦ Userbot запущен! by domician ✦')
-    print('✦ Бесконечный календарь запускается командой .dmcnc')
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
