@@ -4,12 +4,10 @@ from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
-# ===== СЕССИЯ =====
 SESSION = "1AZWarzUBu1oI9h_g78W0oqcKfDLve8NiYQLBdA5-Tw-zz6HSKd37sEYGiR5f_T0TrM3zRuHEBXwwirA_PlIiLdIPGPKQzKQYTi5Kc5MW5qU1hfGKlp8kgTMYxRF14mq4WuaPTw2L5Yt75JRjD_X3i7aWZYL2X9BjBwBdk6iMJOmlIQg1Yq662ANjej8VLuhb68Twt-uyRw7s3jbgD3-29pcq1-sxWpFJbOhMAq8itkTWcQuQ2DFIou73djHKV5wC2JSwFWV0hn6jY30pH3LgHzSNwMSNNNleMHnnCwvxCg9Xqy3h4G7AggEFh5IwOM7RiH3bJIEkfb6_kpyO-pY0nVq0uWeGok0="
 
 client = TelegramClient(StringSession(SESSION), 7832255, "25d037f2d44d51691a7a9c92f2ed1a1d")
 
-# ===== НАСТРОЙКИ =====
 INTERVAL_MINUTES = 55
 MESSAGES_FILE = "data.txt"
 MENU_VIDEO_FILE = "menu_video.json"
@@ -42,39 +40,44 @@ def log_to_file(message):
     with open("log.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} - {message}\n")
 
-# ===== ОТЛОЖЕННАЯ ОТПРАВКА (ПЛАНИРОВАНИЕ) =====
-async def schedule_messages(user_id, messages):
-    """Планирует отправку всех сообщений с интервалом 55 минут"""
+async def schedule_messages(user_id, messages, is_loop=False):
+    """Планирует отложенные сообщения с интервалом 55 минут"""
     if not messages:
         return
 
-    # Текущее время + 55 минут для первого сообщения
     base_time = datetime.now() + timedelta(minutes=INTERVAL_MINUTES)
 
     for i, msg in enumerate(messages):
-        # Время отправки: base_time + i * INTERVAL_MINUTES
         scheduled_time = base_time + timedelta(minutes=i * INTERVAL_MINUTES)
-
         try:
-            # Отправляем с отложенным временем
-            await client.send_message(
-                user_id,
-                msg,
-                schedule=scheduled_time
-            )
+            await client.send_message(user_id, msg, schedule=scheduled_time)
             log_to_file(f"Запланировано для {user_id}: {msg[:30]}... на {scheduled_time}")
         except Exception as e:
             log_to_file(f"Ошибка планирования для {user_id}: {e}")
 
-    log_to_file(f"Все {len(messages)} сообщений запланированы для {user_id}")
+    log_to_file(f"Запланировано {len(messages)} сообщений для {user_id}")
 
-# ===== МЕНЮ =====
+    # Если это не цикл (первый запуск) — запускаем бесконечный цикл
+    if not is_loop:
+        asyncio.create_task(loop_schedule(user_id, messages))
+
+async def loop_schedule(user_id, messages):
+    """Бесконечно планирует сообщения после завершения предыдущего цикла"""
+    while True:
+        # Ждём, пока все сообщения из текущего цикла уйдут
+        total_delay = len(messages) * INTERVAL_MINUTES * 60
+        await asyncio.sleep(total_delay + 60)  # +60 секунд для запаса
+
+        # Запускаем новый цикл
+        log_to_file(f"Запуск нового цикла для {user_id}")
+        await schedule_messages(user_id, messages, is_loop=True)
+
 @client.on(events.NewMessage(pattern=r'\.menu$'))
 async def menu_command(event):
     menu_text = """
 ✦ USERBOT MENU ✦
 
-.dmcnc @username — календарь (отложенная отправка)
+.dmcnc @username — бесконечный календарь
 .dmcnr @username — автоответчик
 .dmcnrm @username — медиа-автоответчик
 .cln @username — очистка календаря
@@ -94,7 +97,6 @@ async def menu_command(event):
     else:
         await event.reply(menu_text)
 
-# ===== СОХРАНЕНИЕ ВИДЕО ДЛЯ .menu =====
 @client.on(events.NewMessage)
 async def save_menu_video_handler(event):
     if event.is_reply and event.message.text and event.message.text.startswith('.menu'):
@@ -105,12 +107,10 @@ async def save_menu_video_handler(event):
             menu_video_id = replied.video.id
             await event.reply("✅ Видео для .menu сохранено!")
 
-# ===== .ping =====
 @client.on(events.NewMessage(pattern=r'\.ping$'))
 async def ping_command(event):
     await event.reply('✦ Понг!')
 
-# ===== КАЛЕНДАРЬ (.dmcnc) — ОТЛОЖЕННАЯ ОТПРАВКА =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s*(?:@(\S+))?'))
 async def calendar_command(event):
     args = event.raw_text.split()
@@ -133,21 +133,18 @@ async def calendar_command(event):
 
     messages = load_messages()
     if not messages:
-        await event.reply('✦ Файл data.txt пуст')
         return
 
-    # Запускаем планирование отложенных сообщений
+    calendars[user_id] = messages.copy()
     asyncio.create_task(schedule_messages(user_id, messages))
 
-    # Удаляем сообщение с командой
     try:
         await event.delete()
     except:
         pass
 
-    log_to_file(f"Календарь для {user_id} запущен (отложенная отправка)")
+    log_to_file(f"Календарь для {user_id} запущен (бесконечный цикл)")
 
-# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) — НЕ РАБОТАЕТ ДЛЯ ОТЛОЖЕННЫХ =====
 @client.on(events.NewMessage(pattern=r'\.cln\s*(?:@(\S+))?'))
 async def clear_calendar(event):
     args = event.raw_text.split()
@@ -168,10 +165,16 @@ async def clear_calendar(event):
     else:
         user_id = event.chat_id
 
-    # Отложенные сообщения НЕЛЬЗЯ отменить через API
-    await event.reply('✦ Отложенные сообщения нельзя отменить через бота. Отмени вручную в Telegram.')
+    if user_id in calendars:
+        del calendars[user_id]
+        log_to_file(f"Календарь для {user_id} остановлен")
+        try:
+            await event.delete()
+        except:
+            pass
+    else:
+        await event.reply(f'✦ Календарь для {target or "этого чата"} не найден')
 
-# ===== АВТООТВЕТЧИК (.dmcnr) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnr\s*(?:@(\S+))?'))
 async def autoreply_command(event):
     args = event.raw_text.split()
@@ -196,7 +199,6 @@ async def autoreply_command(event):
     log_to_file(f"Автоответчик для {user_id} включен")
     await event.reply(f'✦ Автоответчик для {target or "этого чата"} включен')
 
-# ===== МЕДИА-АВТООТВЕТЧИК (.dmcnrm) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnrm\s*(?:@(\S+))?'))
 async def media_autoreply_command(event):
     args = event.raw_text.split()
@@ -229,7 +231,6 @@ async def media_autoreply_command(event):
     log_to_file(f"Медиа-автоответчик для {user_id} включен")
     await event.reply(f'✦ Медиа-автоответчик для {target or "этого чата"} включен')
 
-# ===== ОСТАНОВКА АВТООТВЕТЧИКА (.stop) =====
 @client.on(events.NewMessage(pattern=r'\.stop\s*(?:@(\S+))?'))
 async def stop_autoreply(event):
     args = event.raw_text.split()
@@ -257,7 +258,6 @@ async def stop_autoreply(event):
     else:
         await event.reply(f'✦ Автоответчик для {target or "этого чата"} не найден')
 
-# ===== ОСТАНОВКА МЕДИА-АВТООТВЕТЧИКА (.stopm) =====
 @client.on(events.NewMessage(pattern=r'\.stopm\s*(?:@(\S+))?'))
 async def stop_media_autoreply(event):
     args = event.raw_text.split()
@@ -285,7 +285,6 @@ async def stop_media_autoreply(event):
     else:
         await event.reply(f'✦ Медиа-автоответчик для {target or "этого чата"} не найден')
 
-# ===== ЛОГ (.readlog) =====
 @client.on(events.NewMessage(pattern=r'\.readlog$'))
 async def read_log_command(event):
     try:
@@ -294,7 +293,6 @@ async def read_log_command(event):
     except:
         await event.reply('✦ Лог пуст')
 
-# ===== АВТООТВЕТ НА ВХОДЯЩИЕ =====
 @client.on(events.NewMessage)
 async def handle_incoming(event):
     if event.out:
@@ -310,7 +308,6 @@ async def handle_incoming(event):
         await event.reply(data['caption'], file=data['media'])
         return
 
-# ===== ЗАПУСК =====
 async def main():
     await client.start()
     print('✦ Userbot запущен! by domician ✦')
