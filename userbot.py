@@ -42,25 +42,31 @@ def log_to_file(message):
     with open("log.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} - {message}\n")
 
-# ===== БЕСКОНЕЧНАЯ ОТПРАВКА =====
-async def send_loop(user_id, messages):
-    index = 0
-    while True:
+# ===== ОТЛОЖЕННАЯ ОТПРАВКА (ПЛАНИРОВАНИЕ) =====
+async def schedule_messages(user_id, messages):
+    """Планирует отправку всех сообщений с интервалом 55 минут"""
+    if not messages:
+        return
+
+    # Текущее время + 55 минут для первого сообщения
+    base_time = datetime.now() + timedelta(minutes=INTERVAL_MINUTES)
+
+    for i, msg in enumerate(messages):
+        # Время отправки: base_time + i * INTERVAL_MINUTES
+        scheduled_time = base_time + timedelta(minutes=i * INTERVAL_MINUTES)
+
         try:
-            if not messages:
-                await asyncio.sleep(60)
-                continue
-
-            msg = messages[index % len(messages)]
-            await client.send_message(user_id, msg)
-            log_to_file(f"Календарь {user_id}: {msg[:30]}...")
-
-            index += 1
-            await asyncio.sleep(INTERVAL_MINUTES * 60)
-
+            # Отправляем с отложенным временем
+            await client.send_message(
+                user_id,
+                msg,
+                schedule=scheduled_time
+            )
+            log_to_file(f"Запланировано для {user_id}: {msg[:30]}... на {scheduled_time}")
         except Exception as e:
-            log_to_file(f"Ошибка отправки {user_id}: {e}")
-            await asyncio.sleep(60)
+            log_to_file(f"Ошибка планирования для {user_id}: {e}")
+
+    log_to_file(f"Все {len(messages)} сообщений запланированы для {user_id}")
 
 # ===== МЕНЮ =====
 @client.on(events.NewMessage(pattern=r'\.menu$'))
@@ -68,7 +74,7 @@ async def menu_command(event):
     menu_text = """
 ✦ USERBOT MENU ✦
 
-.dmcnc @username — календарь (без ответа)
+.dmcnc @username — календарь (отложенная отправка)
 .dmcnr @username — автоответчик
 .dmcnrm @username — медиа-автоответчик
 .cln @username — очистка календаря
@@ -104,7 +110,7 @@ async def save_menu_video_handler(event):
 async def ping_command(event):
     await event.reply('✦ Понг!')
 
-# ===== ТИХИЙ КАЛЕНДАРЬ (.dmcnc) =====
+# ===== КАЛЕНДАРЬ (.dmcnc) — ОТЛОЖЕННАЯ ОТПРАВКА =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s*(?:@(\S+))?'))
 async def calendar_command(event):
     args = event.raw_text.split()
@@ -127,10 +133,11 @@ async def calendar_command(event):
 
     messages = load_messages()
     if not messages:
+        await event.reply('✦ Файл data.txt пуст')
         return
 
-    calendars[user_id] = messages.copy()
-    asyncio.create_task(send_loop(user_id, messages))
+    # Запускаем планирование отложенных сообщений
+    asyncio.create_task(schedule_messages(user_id, messages))
 
     # Удаляем сообщение с командой
     try:
@@ -138,9 +145,9 @@ async def calendar_command(event):
     except:
         pass
 
-    log_to_file(f"Календарь для {user_id} запущен (тихо)")
+    log_to_file(f"Календарь для {user_id} запущен (отложенная отправка)")
 
-# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) =====
+# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) — НЕ РАБОТАЕТ ДЛЯ ОТЛОЖЕННЫХ =====
 @client.on(events.NewMessage(pattern=r'\.cln\s*(?:@(\S+))?'))
 async def clear_calendar(event):
     args = event.raw_text.split()
@@ -161,12 +168,8 @@ async def clear_calendar(event):
     else:
         user_id = event.chat_id
 
-    if user_id in calendars:
-        del calendars[user_id]
-        log_to_file(f"Календарь для {user_id} остановлен")
-        await event.delete()
-    else:
-        await event.reply(f'✦ Календарь для {target or "этого чата"} не найден')
+    # Отложенные сообщения НЕЛЬЗЯ отменить через API
+    await event.reply('✦ Отложенные сообщения нельзя отменить через бота. Отмени вручную в Telegram.')
 
 # ===== АВТООТВЕТЧИК (.dmcnr) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnr\s*(?:@(\S+))?'))
