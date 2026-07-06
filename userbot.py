@@ -1,5 +1,7 @@
 import asyncio
 import random
+import json
+import os
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -12,13 +14,25 @@ client = TelegramClient(StringSession(SESSION), 7832255, "25d037f2d44d51691a7a9c
 # ===== НАСТРОЙКИ =====
 INTERVAL_MINUTES = 55
 MESSAGES_FILE = "data.txt"
+MENU_VIDEO_FILE = "menu_video.json"  # для хранения file_id видео
 
 calendars = {}
 auto_replies = {}
 media_auto_replies = {}
 
-# ===== ВИДЕО ДЛЯ .ping (замени на своё) =====
-PING_VIDEO = None  # Сюда можно вставить file_id или путь к видео
+# Загружаем сохранённое видео для .menu
+def load_menu_video():
+    try:
+        with open(MENU_VIDEO_FILE, "r") as f:
+            return json.load(f).get("file_id")
+    except:
+        return None
+
+def save_menu_video(file_id):
+    with open(MENU_VIDEO_FILE, "w") as f:
+        json.dump({"file_id": file_id}, f)
+
+menu_video_id = load_menu_video()
 
 def load_messages():
     try:
@@ -45,11 +59,11 @@ async def send_scheduled_messages():
                     log_to_file(f"Ошибка отправки {user_id}: {e}")
         await asyncio.sleep(INTERVAL_MINUTES * 60)
 
-# ===== МЕНЮ (с by domician) =====
+# ===== МЕНЮ (с видео) =====
 @client.on(events.NewMessage(pattern=r'\.menu$'))
 async def menu_command(event):
     menu_text = """
-✦ **МЕНЮ ЮЗЕРБОТА** ✦
+✦ USERBOT MENU ✦
 
 .dmcnc @username — календарь (если без юзера — для чата)
 .dmcnr @username — автоответчик
@@ -58,23 +72,42 @@ async def menu_command(event):
 .stop @username — стоп автоответ
 .stopm @username — стоп медиа
 .readlog — лог
-.ping — пинг (с видео, если настроено)
-.menu — меню
+.ping — пинг
+.menu — меню (с видео, если настроено)
 
 ✦ by domician ✦
     """
-    await event.reply(menu_text)
+    if menu_video_id:
+        try:
+            await event.reply(menu_text, file=menu_video_id)
+        except:
+            await event.reply(menu_text + "\n\n⚠️ Видео не загрузилось")
+    else:
+        await event.reply(menu_text + "\n\nℹ️ Настрой видео: ответь на .menu видео")
 
-# ===== .ping С ВИДЕО =====
+# ===== КОМАНДА ДЛЯ СОХРАНЕНИЯ ВИДЕО (ответ на .menu) =====
+@client.on(events.NewMessage)
+async def save_menu_video_handler(event):
+    if event.is_reply and event.message.text and event.message.text.startswith('.menu'):
+        # Если это ответ на .menu и есть видео
+        replied = await event.get_reply_message()
+        if replied and replied.video:
+            file_id = replied.video.id
+            save_menu_video(file_id)
+            global menu_video_id
+            menu_video_id = file_id
+            await event.reply("✅ Видео для .menu сохранено!")
+        elif replied and replied.document:
+            # Если ответили документом (видео-файл)
+            file_id = replied.document.id
+            save_menu_video(file_id)
+            menu_video_id = file_id
+            await event.reply("✅ Видео-файл для .menu сохранён!")
+
+# ===== .ping =====
 @client.on(events.NewMessage(pattern=r'\.ping$'))
 async def ping_command(event):
-    if PING_VIDEO:
-        try:
-            await event.reply("✦ Понг!", file=PING_VIDEO)
-        except:
-            await event.reply("✦ Понг! (видео не загрузилось)")
-    else:
-        await event.reply("✦ Понг! (видео не настроено)")
+    await event.reply('✦ Понг!')
 
 # ===== КАЛЕНДАРЬ =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s*(?:@(\S+))?'))
@@ -275,7 +308,7 @@ async def handle_incoming(event):
 # ===== ЗАПУСК =====
 async def main():
     await client.start()
-    print('✦ Юзербот запущен! by domician')
+    print('✦ Userbot запущен! by domician ✦')
     asyncio.create_task(send_scheduled_messages())
     await client.run_until_disconnected()
 
