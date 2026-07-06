@@ -1,13 +1,11 @@
 import asyncio
 import random
-import os
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 
 API_ID = 7832255
 API_HASH = "25d037f2d44d51691a7a9c92f2ed1a1d"
 
-# Сессия будет сохранена в файл my_userbot.session
 client = TelegramClient("my_userbot", API_ID, API_HASH)
 
 TARGET_CHAT = "@username"  # ЗАМЕНИ НА СВОЙ ЮЗЕРНЕЙМ
@@ -23,64 +21,40 @@ def load_messages():
         with open(MESSAGES_FILE, "r", encoding="utf-8") as f:
             return [line.strip() for line in f if line.strip()]
     except FileNotFoundError:
-        print("✦ Файл data.txt не найден")
         return []
 
 def log_to_file(message):
     with open("log.txt", "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
+        f.write(f"{datetime.now()} - {message}\n")
 
 async def send_scheduled_messages():
-    now = datetime.now()
-    minutes_now = now.hour * 60 + now.minute
-    next_interval = ((minutes_now // INTERVAL_MINUTES) + 1) * INTERVAL_MINUTES
-    wait_seconds = (next_interval - minutes_now) * 60 - now.second
-    if wait_seconds <= 0:
-        wait_seconds += INTERVAL_MINUTES * 60
-
-    print(f"✦ Первый запуск через {wait_seconds // 60} мин {wait_seconds % 60} сек")
-    await asyncio.sleep(wait_seconds)
-
+    await asyncio.sleep(10)
     while True:
-        try:
-            messages = load_messages()
-            if messages:
-                msg = random.choice(messages)
-                await client.send_message(TARGET_CHAT, msg)
-                log_to_file(f"Отправлено: {msg[:50]}...")
-                print(f"✦ Отправлено: {msg[:50]}...")
-            else:
-                print("✦ Нет сообщений для отправки")
-                log_to_file("✦ Нет сообщений в data.txt")
-        except Exception as e:
-            log_to_file(f"✦ Ошибка отправки: {e}")
-            print(f"✦ Ошибка: {e}")
+        messages = load_messages()
+        if messages:
+            msg = random.choice(messages)
+            await client.send_message(TARGET_CHAT, msg)
+            log_to_file(f"Отправлено: {msg[:30]}...")
         await asyncio.sleep(INTERVAL_MINUTES * 60)
 
 @client.on(events.NewMessage(pattern=r'\.menu$'))
 async def menu_command(event):
-    menu_text = """
-✦ **МЕНЮ ЮЗЕРБОТА** ✦
-
-✦ `.dmcnc @username` — календарь (продолжает существующий)
-✦ `.dmcnr @username` — автоответчик
-✦ `.dmcnrm @username` — медиа-автоответчик
-✦ `.cln @username` — очистка календаря
-✦ `.stop @username` — остановка автоответчика
-✦ `.stopm @username` — остановка медиа-автоответчика
-✦ `.readlog` — показать лог-файл
-✦ `.ping` — проверить, жив ли юзербот
-✦ `.menu` — показать это меню
-    """
-    await event.reply(menu_text)
+    await event.reply("""
+✦ МЕНЮ ✦
+.dmcnc @username — календарь
+.dmcnr @username — автоответчик
+.dmcnrm @username — медиа-автоответчик
+.cln @username — очистка
+.stop @username — стоп автоответ
+.stopm @username — стоп медиа
+.readlog — лог
+.ping — пинг
+.menu — меню
+""")
 
 @client.on(events.NewMessage(pattern=r'\.ping$'))
 async def ping_command(event):
-    start = datetime.now()
     await event.reply('✦ Понг!')
-    end = datetime.now()
-    ms = (end - start).microseconds / 1000
-    await event.edit(f'✦ Понг! ({ms:.2f} мс)')
 
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s+(.+?)(?:\s+шапка)?$'))
 async def calendar_command(event):
@@ -167,10 +141,9 @@ async def stop_media_autoreply(event):
 async def read_log_command(event):
     try:
         with open("log.txt", "r", encoding="utf-8") as f:
-            log_content = f.read()[-1500:]
-            await event.reply(f'✦ Лог (последние 1500 символов):\n{log_content}')
-    except FileNotFoundError:
-        await event.reply('✦ Лог-файл пуст')
+            await event.reply(f'✦ Лог:\n{f.read()[-1000:]}')
+    except:
+        await event.reply('✦ Лог пуст')
 
 @client.on(events.NewMessage)
 async def handle_incoming(event):
@@ -188,12 +161,8 @@ async def handle_incoming(event):
         return
 
 async def main():
-    # Это нужно, чтобы юзербот не запрашивал номер при запуске
-    # Сессия будет автоматически сохранена после первого запуска
     await client.start()
     print('✦ Юзербот запущен!')
-    print(f'✦ Отправка сообщений каждые {INTERVAL_MINUTES} минут')
-    print('✦ Команды: .menu, .ping, .dmcnc, .dmcnr, .dmcnrm, .cln, .stop, .stopm, .readlog')
     asyncio.create_task(send_scheduled_messages())
     await client.run_until_disconnected()
 
