@@ -1,7 +1,6 @@
 import asyncio
 import random
 import json
-import os
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -14,13 +13,12 @@ client = TelegramClient(StringSession(SESSION), 7832255, "25d037f2d44d51691a7a9c
 # ===== НАСТРОЙКИ =====
 INTERVAL_MINUTES = 55
 MESSAGES_FILE = "data.txt"
-MENU_VIDEO_FILE = "menu_video.json"  # для хранения file_id видео
+MENU_VIDEO_FILE = "menu_video.json"
 
-calendars = {}
-auto_replies = {}
-media_auto_replies = {}
+calendars = {}          # {user_id: [сообщения]}
+auto_replies = {}       # {user_id: текст}
+media_auto_replies = {} # {user_id: медиа}
 
-# Загружаем сохранённое видео для .menu
 def load_menu_video():
     try:
         with open(MENU_VIDEO_FILE, "r") as f:
@@ -49,9 +47,14 @@ def log_to_file(message):
 async def send_scheduled_messages():
     await asyncio.sleep(10)
     while True:
+        messages = load_messages()
+        if not messages:
+            await asyncio.sleep(INTERVAL_MINUTES * 60)
+            continue
+
         for user_id, msgs in list(calendars.items()):
             if msgs:
-                msg = random.choice(msgs)
+                msg = random.choice(messages)
                 try:
                     await client.send_message(user_id, msg)
                     log_to_file(f"Календарь для {user_id}: {msg[:30]}...")
@@ -59,7 +62,7 @@ async def send_scheduled_messages():
                     log_to_file(f"Ошибка отправки {user_id}: {e}")
         await asyncio.sleep(INTERVAL_MINUTES * 60)
 
-# ===== МЕНЮ (с видео) =====
+# ===== МЕНЮ =====
 @client.on(events.NewMessage(pattern=r'\.menu$'))
 async def menu_command(event):
     menu_text = """
@@ -73,7 +76,7 @@ async def menu_command(event):
 .stopm @username — стоп медиа
 .readlog — лог
 .ping — пинг
-.menu — меню (с видео, если настроено)
+.menu — меню
 
 ✦ by domician ✦
     """
@@ -81,35 +84,27 @@ async def menu_command(event):
         try:
             await event.reply(menu_text, file=menu_video_id)
         except:
-            await event.reply(menu_text + "\n\n⚠️ Видео не загрузилось")
+            await event.reply(menu_text)
     else:
-        await event.reply(menu_text + "\n\nℹ️ Настрой видео: ответь на .menu видео")
+        await event.reply(menu_text)
 
-# ===== КОМАНДА ДЛЯ СОХРАНЕНИЯ ВИДЕО (ответ на .menu) =====
+# ===== СОХРАНЕНИЕ ВИДЕО ДЛЯ .menu =====
 @client.on(events.NewMessage)
 async def save_menu_video_handler(event):
     if event.is_reply and event.message.text and event.message.text.startswith('.menu'):
-        # Если это ответ на .menu и есть видео
         replied = await event.get_reply_message()
         if replied and replied.video:
-            file_id = replied.video.id
-            save_menu_video(file_id)
+            save_menu_video(replied.video.id)
             global menu_video_id
-            menu_video_id = file_id
+            menu_video_id = replied.video.id
             await event.reply("✅ Видео для .menu сохранено!")
-        elif replied and replied.document:
-            # Если ответили документом (видео-файл)
-            file_id = replied.document.id
-            save_menu_video(file_id)
-            menu_video_id = file_id
-            await event.reply("✅ Видео-файл для .menu сохранён!")
 
 # ===== .ping =====
 @client.on(events.NewMessage(pattern=r'\.ping$'))
 async def ping_command(event):
     await event.reply('✦ Понг!')
 
-# ===== КАЛЕНДАРЬ =====
+# ===== КАЛЕНДАРЬ (.dmcnc) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnc\s*(?:@(\S+))?'))
 async def calendar_command(event):
     args = event.raw_text.split()
@@ -132,14 +127,17 @@ async def calendar_command(event):
 
     if user_id not in calendars:
         calendars[user_id] = []
+
+    # Добавляем задачу в календарь
     calendars[user_id].append({
         'text': '✦ Отложенное сообщение',
         'time': datetime.now() + timedelta(hours=1)
     })
-    log_to_file(f"Календарь для {user_id} продолжен ({len(calendars[user_id])} сообщений)")
-    await event.reply(f'✦ Календарь для {target or "этого чата"} продолжен ({len(calendars[user_id])} сообщений)')
 
-# ===== АВТООТВЕТЧИК =====
+    log_to_file(f"Календарь для {user_id} продолжен ({len(calendars[user_id])} задач)")
+    await event.reply(f'✦ Календарь для {target or "этого чата"} продолжен ({len(calendars[user_id])} задач)')
+
+# ===== АВТООТВЕТЧИК (.dmcnr) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnr\s*(?:@(\S+))?'))
 async def autoreply_command(event):
     args = event.raw_text.split()
@@ -164,7 +162,7 @@ async def autoreply_command(event):
     log_to_file(f"Автоответчик для {user_id} включен")
     await event.reply(f'✦ Автоответчик для {target or "этого чата"} включен')
 
-# ===== МЕДИА-АВТООТВЕТЧИК =====
+# ===== МЕДИА-АВТООТВЕТЧИК (.dmcnrm) =====
 @client.on(events.NewMessage(pattern=r'\.dmcnrm\s*(?:@(\S+))?'))
 async def media_autoreply_command(event):
     args = event.raw_text.split()
@@ -189,6 +187,7 @@ async def media_autoreply_command(event):
     if not replied or not replied.media:
         await event.reply('✦ Нужно ответить на медиа-сообщение')
         return
+
     media_auto_replies[user_id] = {
         'media': replied.media,
         'caption': replied.text or '✦ Медиа-ответ'
@@ -196,7 +195,7 @@ async def media_autoreply_command(event):
     log_to_file(f"Медиа-автоответчик для {user_id} включен")
     await event.reply(f'✦ Медиа-автоответчик для {target or "этого чата"} включен')
 
-# ===== ОЧИСТКА =====
+# ===== ОЧИСТКА КАЛЕНДАРЯ (.cln) =====
 @client.on(events.NewMessage(pattern=r'\.cln\s*(?:@(\S+))?'))
 async def clear_calendar(event):
     args = event.raw_text.split()
@@ -224,7 +223,7 @@ async def clear_calendar(event):
     else:
         await event.reply(f'✦ Календарь для {target or "этого чата"} не найден')
 
-# ===== ОСТАНОВКА =====
+# ===== ОСТАНОВКА АВТООТВЕТЧИКА (.stop) =====
 @client.on(events.NewMessage(pattern=r'\.stop\s*(?:@(\S+))?'))
 async def stop_autoreply(event):
     args = event.raw_text.split()
@@ -252,7 +251,7 @@ async def stop_autoreply(event):
     else:
         await event.reply(f'✦ Автоответчик для {target or "этого чата"} не найден')
 
-# ===== ОСТАНОВКА МЕДИА =====
+# ===== ОСТАНОВКА МЕДИА-АВТООТВЕТЧИКА (.stopm) =====
 @client.on(events.NewMessage(pattern=r'\.stopm\s*(?:@(\S+))?'))
 async def stop_media_autoreply(event):
     args = event.raw_text.split()
@@ -280,7 +279,7 @@ async def stop_media_autoreply(event):
     else:
         await event.reply(f'✦ Медиа-автоответчик для {target or "этого чата"} не найден')
 
-# ===== ЛОГ =====
+# ===== ЛОГ (.readlog) =====
 @client.on(events.NewMessage(pattern=r'\.readlog$'))
 async def read_log_command(event):
     try:
